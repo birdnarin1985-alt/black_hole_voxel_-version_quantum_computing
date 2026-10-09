@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>3D Voxel Black Hole - Universal Dynamic Edition (60 FPS)</title>
+    <style>
+        /* โครงสร้างล็อกเสถียรปักหลักแน่นหนา ไร้สั่นคลอนโอนเอน ทุกค่ายสมาร์ทโฟนและแท็บเล็ต */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000000;
+            position: fixed; 
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="glCanvas"></canvas>
+
+    <!-- 1. Vertex Shader (พอยน์เตอร์รับพิกัดหน้าจอแบบสากล) -->
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec2 position;
+        varying vec2 v_uv;
+        void main() {
+            gl_Position = vec4(position, 0.0, 1.0);
+            v_uv = position * 0.5 + 0.5;
+        }
+    </script>
+
+    <!-- 2. Fragment Shader (คำนวณสัดส่วนกล้อง Auto Dynamic ตามหน้าจอบน GPU ล้วน) -->
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform sampler2D u_textTexture;
+        varying vec2 v_uv;
+
+        const float GOLDEN_RATIO = 1.61803398875;
+
+        // ฟังก์ชันกำหนดโครงสร้างวัตถุรูปธรรมตามเหตุปัจจัยแบบแปรผันตามหน้าจอ
+        float mapVoxelUniverse(vec3 p, vec2 uv, float aspect) {
+            // [กรอบรูปจักรวาลสัดส่วนทองคำปรับตามหน้าจออัตโนมัติ] ปักหลักมั่นคง
+            float borderSize = 0.03 * GOLDEN_RATIO;
+            float boundX = 0.5 * GOLDEN_RATIO;
+            float boundY = 0.5 * (GOLDEN_RATIO / aspect);
+            
+            // ตีกรอบสัมพันธ์ตามความกว้างยาวของหน้าจอจริง ไม่ให้หลุดเลยขอบจอ
+            if (abs(uv.x) > (boundX - borderSize) || abs(uv.y) > (boundY - borderSize)) {
+                vec2 gridFrame = floor(uv * 35.0);
+                if (sin(gridFrame.x * 2.0) * cos(gridFrame.y * 2.0) > -0.2) return 2.0; 
+            }
+
+            // [ขอบฟ้าเหตุการณ์หลุมดำ] สุญญตา/อนัตตาดำสนิท
+            float pulse = sin(u_time * 2.2) * 0.015;
+            float rs = 0.32 + pulse; 
+            float dToCenter = length(p);
+
+            if (dToCenter < rs) return -1.0; 
+
+            // [แผ่นจานมวลสาร Voxel ศิลปะระดับโลกสว่างไสว] สไตล์ครูบาอาจารย์ศิลปินไทย
+            float diskOuter = rs * GOLDEN_RATIO * 2.4; 
+            if (dToCenter < diskOuter && abs(p.y) < 0.035) {
+                vec3 voxelGrid = floor(p * 22.0);
+                float pattern = sin(voxelGrid.x * 0.7) * cos(voxelGrid.z * 0.7);
+                if (pattern > 0.25) return 1.0; 
+            }
+            return 0.0;
+        }
+
+        void main() {
+            // ปรับสมการ Dynamic Aspect Ratio แก้ไขอาการหน้าจอเลยขอบจอของทุกค่าย
+            float aspect = u_resolution.x / u_resolution.y;
+            vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+            vec2 screenUV = gl_FragCoord.xy / u_resolution.xy; 
+            
+            vec3 finalColor = vec3(0.01, 0.01, 0.02); 
+            
+            // มุมกล้ององศามาสเตอร์พีซ คมชัด มั่นคง เด็ดขาด
+            vec3 ro = vec3(0.0, 4.0, 0.4); 
+            vec3 rd = normalize(vec3(uv.x, -1.0, uv.y - 0.08)); 
+            
+            float t = 0.0;
+            vec3 p = ro;
+            
+            float hitType = mapVoxelUniverse(p, uv, aspect);
+            
+            if (hitType == 2.0) {
+                // ขอบทองคำโบราณ ขลัง เรืองประกายเสถียร
+                float frameGlow = sin(screenUV.x * 5.0 + screenUV.y * 5.0 + u_time) * 0.15 + 0.85;
+                finalColor = vec3(0.82, 0.62, 0.15) * frameGlow;
+            } else {
+                // มหากาพย์ Raymarching ความเร็วแสงหักเหรอบขอบฟ้าเหตุการณ์
+                for (int i = 0; i < 50; i++) {
+                    p = ro + rd * t;
+                    float d = length(p);
+                    
+                    if (d < 2.5) {
+                        float deflection = (0.11 * GOLDEN_RATIO) / (d * d + 0.01);
+                        rd = normalize(rd - normalize(p) * deflection);
+                    }
+                    
+                    float checkHit = mapVoxelUniverse(p, uv, aspect);
+                    if (checkHit < 0.0) {
+                        finalColor = vec3(0.0, 0.0, 0.0); // ศูนย์กลางความว่างเปล่ามืดสนิทไร้อวิชชา
+                        break;
+                    } else if (checkHit == 1.0) {
+                        float colorShift = sin(p.x * 3.0 + u_time) * 0.5 + 0.5;
+                        finalColor = mix(vec3(0.98, 0.38, 0.02), vec3(0.92, 0.76, 0.15), colorShift) * (1.0 - t / 5.0);
+                        break;
+                    }
+                    t += 0.08;
+                }
+                
+                // ซ้อนวรรณศิลป์อักษรไทยอารยธรรมเรืองแสงออโรร่ากระจ่างตา ไม่สั่นคลอน
+                vec4 textTex = texture2D(u_textTexture, vec2(screenUV.x, 1.0 - screenUV.y));
+                if (textTex.a > 0.1 && (finalColor == vec3(0.01, 0.01, 0.02) || length(p) > 2.5)) {
+                    finalColor = mix(finalColor, vec3(0.2, 0.7, 1.0) * textTex.r, textTex.a);
+                }
+            }
+            
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    </script>
+
+    <!-- 3. JavaScript Component (จับพิกัดอุปกรณ์ ปราบสั่นคลอน อัปเดตหน่วยความจำ GPU แตก) -->
+    <script>
+        // ปราบและบล็อกการโอนเอนไถลหน้าจอของ iOS และ Android เด็ดขาดนิ่งสนิทดั่ง Native App
+        document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+        document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
+
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) { alert('ระบบไม่รองรับ WebGL'); }
+
+        // วาดแผ่นป้ายข้อความศิลปะแบบ Dynamic ยืดหยุ่นตามกว้างยาวจอ
+        const textCanvas = document.createElement('canvas');
+        const textCtx = textCanvas.getContext('2d');
+        textCanvas.width = 1024;
+        textCanvas.height = 1024;
+        
+        function drawThaiGraphics() {
+            textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+            textCtx.fillStyle = "white";
+            textCtx.textAlign = "center";
+            
+            textCtx.font = "bold 36px sans-serif";
+            textCtx.fillText("แสงบิดเบี้ยวหักเหผ่านขอบฟ้าเหตุการณ์", 512, 100);
+            textCtx.font = "24px sans-serif";
+            textCtx.fillText("รังสรรค์ระบบเสถียร Auto Dynamic โดยช่างเบิร์ด วิศวกรไทย", 512, 150);
+            
+            textCtx.font = "italic bold 38px 'Times New Roman', sans-serif";
+            textCtx.fillText("R_μν - 1/2 R g_μν = 8πG/c⁴ T_μν", 512, 880);
+        }
+        drawThaiGraphics();
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        const vs = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vertex-shader').text);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fragment-shader').text);
+        const program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+
+        const pos = gl.getAttribLocation(program, 'position');
+        gl.enableVertexAttribArray(pos);
+        gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+        const resLoc = gl.getUniformLocation(program, 'u_resolution');
+        const timeLoc = gl.getUniformLocation(program, 'u_time');
+
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textCanvas);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        // ฟังก์ชันปรับขนาดอัตโนมัติตามสัดส่วนอุปกรณ์จริง (Auto Dynamic Multi-Platform)
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+
+        function draw(time) {
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.uniform2f(resLoc, gl.canvas.width, gl.canvas.height);
+            gl.uniform1f(timeLoc, time * 0.001);
+            
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(draw);
+        }
+        requestAnimationFrame(draw);
+    </script>
+</body>
+</html>
